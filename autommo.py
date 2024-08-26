@@ -1,13 +1,18 @@
 import os
 import time
+import logging
 from dotenv import load_dotenv
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException, WebDriverException
+from retrying import retry
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -17,22 +22,22 @@ options.add_argument("--headless")
 options.add_argument("--disable-dev-shm-usage")
 options.add_argument("--no-sandbox")
 
-# Set the binary location to the Chrome installed by the buildpack
-options.binary_location = os.environ.get("GOOGLE_CHROME_BIN")
-
-# Use the ChromeDriver installed by the buildpack
-service = Service(executable_path=os.environ.get("CHROMEDRIVER_PATH"))
-
-driver = webdriver.Chrome(service=service, options=options)
-
-# Navigate to the login page
-driver.get(os.getenv('BASE_URL'))
+driver = webdriver.Chrome(options=options)
 
 # Wait for the page to load
 wait = WebDriverWait(driver, 10)
 
+@retry(stop_max_attempt_number=3, wait_fixed=2000)
+def get_url_with_retry(url):
+    try:
+        driver.get(url)
+    except WebDriverException as e:
+        logger.error(f"WebDriverException occurred: {e}")
+        raise
+
 def login():
     try:
+        get_url_with_retry(os.getenv('BASE_URL'))
         loginBtn = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Log in")))
         loginBtn.click()
 
@@ -45,51 +50,11 @@ def login():
         submit_button = driver.find_element(By.TAG_NAME, "button")
         submit_button.click()
 
-        print("Logged in successfully")
+        logger.info("Logged in successfully")
     except Exception as e:
-        print(f"Login failed: {e}")
+        logger.error(f"Login failed: {e}")
 
-def safe_get_text(xpath):
-    try:
-        return wait.until(EC.presence_of_element_located((By.XPATH, xpath))).text
-    except (NoSuchElementException, TimeoutException, StaleElementReferenceException):
-        return None
-
-def safe_click(xpath):
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, xpath))).click()
-        return True
-    except (NoSuchElementException, TimeoutException, StaleElementReferenceException):
-        return False
-
-def check_and_click_hunt_button():
-    hunt_button_xpath = '//*[@id="game-container"]/div/div[2]/div[1]/div[1]/div[2]/div/div/div/div[1]/button'
-    button_text = safe_get_text(hunt_button_xpath)
-    if button_text == "Start Hunt":
-        if safe_click(hunt_button_xpath):
-            print("Clicked 'Start Hunt' button successfully.")
-            return True
-    return False
-
-def perform_conditional_click():
-    value_xpath = "/html/body/div[1]/main/div[1]/div/div[2]/div[2]/div/div[2]/div[1]/div[1]/div[2]/div/div[2]/div[1]/button/div"
-    button_xpath = '//*[@id="game-container"]/div/div[2]/div[1]/div[1]/div[2]/div/div[2]/div[1]/button'
-    alt_button_xpath = '//*[@id="game-container"]/div/div[2]/div[1]/div[1]/div[2]/div/div/div/div[1]/button'
-
-    value_text = safe_get_text(value_xpath)
-    
-    if value_text is not None and float(value_text) > 0:
-        print(f"Current value: {value_text}")
-        if safe_click(button_xpath):
-            print("Clicked the main button successfully.")
-            time.sleep(0.2)
-            time.sleep(20)
-        elif safe_click(alt_button_xpath):
-            print("Clicked the alternative button successfully.")
-        else:
-            print("Failed to click both buttons.")
-    else:
-        print("The value is not greater than 0 or element not found.")
+# ... [rest of your functions remain the same, just replace print with logger.info or logger.error] ...
 
 def main_loop():
     login()
@@ -98,15 +63,17 @@ def main_loop():
         try:
             if not check_and_click_hunt_button():
                 perform_conditional_click()
-            time.sleep(0,5)  # Wait for 1 second before the next iteration
+            time.sleep(0.5)  # Wait for 0.5 second before the next iteration
         except KeyboardInterrupt:
-            print("Script stopped by user.")
-            driver.quit()
+            logger.info("Script stopped by user.")
             break
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
             time.sleep(0.5)  # Wait a bit before retrying
 
 # Run the main loop
 if __name__ == "__main__":
-    main_loop()
+    try:
+        main_loop()
+    finally:
+        driver.quit()
