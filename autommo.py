@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -14,14 +13,17 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException,
 load_dotenv()
 
 options = Options()
-options.add_experimental_option("detach", True)
-
-# For Heroku deployment, we need to use these options
 options.add_argument("--headless")
 options.add_argument("--disable-dev-shm-usage")
 options.add_argument("--no-sandbox")
 
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+# Set the binary location to the Chrome installed by the buildpack
+options.binary_location = os.environ.get("GOOGLE_CHROME_BIN")
+
+# Use the ChromeDriver installed by the buildpack
+service = Service(executable_path=os.environ.get("CHROMEDRIVER_PATH"))
+
+driver = webdriver.Chrome(service=service, options=options)
 
 # Navigate to the login page
 driver.get(os.getenv('BASE_URL'))
